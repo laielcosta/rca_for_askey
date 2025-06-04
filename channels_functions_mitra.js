@@ -66,12 +66,12 @@ async function navigateToDeviceWebPage(page) {
     }
 }
 
-async function navigateToAdvancedSettings(wifiFrame) {
+async function navigateToAdvancedSettings(page) {
     try {
-        await wifiFrame.click('li[href="me_configuracion_avanzada.asp"]');
+        await page.click('li[href="me_configuracion_avanzada.asp"]');
         console.log("Intentando acceder a la configuración avanzada...");
         await delay(2000);
-        await wifiFrame.click('input[type="button"][value="Aceptar"]');
+        await page.click('input[type="button"][value="Aceptar"]');
         console.log("Se accedió a la configuración avanzada");
         return true;
     } catch (error) {
@@ -80,9 +80,9 @@ async function navigateToAdvancedSettings(wifiFrame) {
     }
 }
 
-async function navigateTo24GHzManagement(CAFrame) {
+async function navigateTo24GHzManagement(page) {
     try {
-        await CAFrame.click('a[url="wifi.asp"]');
+        await page.click('a[url="wifi.asp"]');
         console.log("Se ingresó a la gestión de la red de 2,4GHz");
         return true;
     } catch (error) {
@@ -91,9 +91,9 @@ async function navigateTo24GHzManagement(CAFrame) {
     }
 }
 
-async function iterateChannels(mainFrame, finalPath, page) {
+async function iterateChannels(page, finalPath) {
     // Extraer todos los valores en un solo paso
-    const optionsData = await mainFrame.evaluate(() => {
+    const optionsData = await page.evaluate(() => {
         return Array.from(document.querySelectorAll('select#adm_bandwidth option')).map(option => ({
             value: option.value,
             bandwidth: option.textContent.trim()
@@ -104,8 +104,8 @@ async function iterateChannels(mainFrame, finalPath, page) {
         console.log(`Ancho de banda seleccionado: ${bandwidth}`);
 
         await handleDialog(page);
-        await mainFrame.select('select#adm_bandwidth', value); // Cambia el valor del select
-        await mainFrame.click('input[value="Apply"]');
+        await page.select('select#adm_bandwidth', value); // Cambia el valor del select
+        await page.click('input[value="Apply"]');
         await delay(2000); // Espera para aplicar cambios antes de pasar a la siguiente opción
     
 
@@ -113,16 +113,16 @@ async function iterateChannels(mainFrame, finalPath, page) {
 
     
 
-        const channelCount = await mainFrame.$$eval('select#adm_channel option', options => options.length) - 1;
+        const channelCount = await page.$$eval('select#adm_channel option', options => options.length) - 1;
         console.log("Cantidad de canales disponibles:", channelCount);
         
         
             for (let i = 1; i <= channelCount; i++) {
                 console.log(`Seleccionando canal ${i}. Acho de banda ${bandwidth}...`);
-                await mainFrame.select('select#adm_channel', i.toString());
+                await page.select('select#adm_channel', i.toString());
                 await delay(2000);
                 await handleDialog(page);
-                await mainFrame.click('input[value="Apply"]');
+                await page.click('input[value="Apply"]');
                 console.log(`Se aplicaron los cambios`);
                 await delay(30000);
                 
@@ -133,10 +133,10 @@ async function iterateChannels(mainFrame, finalPath, page) {
         
             // Configuración automática del canal
             console.log(`Seleccionando configuración automática. Ancho de banda: ${bandwidth}...`);
-            await mainFrame.select('select#adm_channel', '0');
+            await page.select('select#adm_channel', '0');
             await delay(2000);
             await handleDialog(page);
-            await mainFrame.click('input[value="Apply"]');
+            await page.click('input[value="Apply"]');
             await delay(30000);
             await page.screenshot({ path: `${finalPath}/WEB/channel_auto_${bandwidth}.png` });
             screenshot({ filename: `${finalPath}/INSSIDER/inSSIDer_channel_auto_${bandwidth}.png` });
@@ -193,7 +193,6 @@ function runInSSIDer(inSSIDerPath) {
 
 async function login(page) {
     let password, loginSuccessful = false;
-    let targetFrame = page.frames().find(frame => frame.url().includes('te_acceso_router.asp'));
 
     while (!loginSuccessful) {
         password = await requestPassword();
@@ -214,7 +213,7 @@ async function login(page) {
                 await dialog.accept();
                 loginSuccessful = !dialog.message().includes('incorrecta');
             } else {
-                await targetFrame.waitForSelector('#pagemenu', { timeout: 5000 });
+                await page.waitForSelector('#pagemenu', { timeout: 5000 });
                 loginSuccessful = true;
             }
             console.log(loginSuccessful ? 'Inicio de sesión exitoso' : 'Contraseña incorrecta. Intente nuevamente.');
