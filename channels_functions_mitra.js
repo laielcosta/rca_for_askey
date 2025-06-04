@@ -202,9 +202,9 @@ async function login(page) {
             return false;
         }
         try {
-            await targetFrame.waitForSelector('input[type="password"]', { visible: true, timeout: 120000 });
-            await targetFrame.type('input[type="password"]', password);
-            await targetFrame.click('.te_acceso_router_enter');
+            await page.waitForSelector('#syspasswd_1', { visible: true, timeout: 120000 });
+            await page.type('#syspasswd_1', password);
+            await page.click('#Submit');
             const dialog = await Promise.race([
                 new Promise(resolve => page.once('dialog', resolve)),
                 delay(5000).then(() => null)
@@ -214,7 +214,7 @@ async function login(page) {
                 await dialog.accept();
                 loginSuccessful = !dialog.message().includes('incorrecta');
             } else {
-                await targetFrame.waitForSelector('td.menuimg', { timeout: 5000 });
+                await targetFrame.waitForSelector('#pagemenu', { timeout: 5000 });
                 loginSuccessful = true;
             }
             console.log(loginSuccessful ? 'Inicio de sesión exitoso' : 'Contraseña incorrecta. Intente nuevamente.');

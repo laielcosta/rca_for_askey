@@ -25,7 +25,7 @@ Notas importantes:
 Sigue en desarrollo…
 */
 const puppeteer = require('puppeteer');
-const func = require('./channels_functions.js');
+const func = require('./channels_functions_mitra.js');
 
 (async () => {
     const browser = await puppeteer.launch({ headless: true, defaultViewport: null, protocolTimeout: 120000, args: ['--window-size=1366,768'] });
@@ -50,7 +50,7 @@ const func = require('./channels_functions.js');
         // Obtener SSID y acceder a configuración avanzada
         const ssidValue = await wifiFrame.$eval('input.Input_box[type="text"]', el => el.value);
         console.log("Filtre en inSSIDer por SSID:", ssidValue);
-        await wifiFrame.click('td.menuimg');
+        await wifiFrame.click('#pagemenu');
         if (!(await func.navigateToAdvancedSettings(wifiFrame))) throw new Error("No se pudo acceder a configuración avanzada");
         await func.delay(2000);
         
