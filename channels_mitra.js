@@ -36,9 +36,8 @@ const func = require('./channels_functions_mitra.js');
         if (!(await func.login(page))) throw new Error("No se pudo iniciar sesión");
         
         // Deshabilitar Unique SSID
-        const wifiFrame = page.frames().find(frame => frame.url().includes('te_wifi.asp'));
-        await wifiFrame.click('input[type="radio"][name="uniqueSSID"][value="0"]');
-        await wifiFrame.click('button[value="Aplicar cambios"]');
+        await page.click('input[type="radio"][name="uniqueSSID"][value="0"]');
+        await page.click('button[value="Aplicar cambios"]');
         await func.delay(2000);
         console.log("Unique SSID deshabilitado");
         
@@ -48,21 +47,19 @@ const func = require('./channels_functions_mitra.js');
         await func.delay(2000);
 
         // Obtener SSID y acceder a configuración avanzada
-        const ssidValue = await wifiFrame.$eval('input.Input_box[type="text"]', el => el.value);
+        const ssidValue = await page.$eval('input.Input_box[type="text"]', el => el.value);
         console.log("Filtre en inSSIDer por SSID:", ssidValue);
-        await wifiFrame.click('#pagemenu');
-        if (!(await func.navigateToAdvancedSettings(wifiFrame))) throw new Error("No se pudo acceder a configuración avanzada");
+        await page.click('#pagemenu');
+        if (!(await func.navigateToAdvancedSettings(page))) throw new Error("No se pudo acceder a configuración avanzada");
         await func.delay(2000);
-        
-        const CAFrame = page.frames().find(frame => frame.url().includes('monu.asp'));
-        if (!(await func.navigateTo24GHzManagement(CAFrame))) throw new Error("No se pudo acceder a la gestión de 2.4GHz");
+
+        if (!(await func.navigateTo24GHzManagement(page))) throw new Error("No se pudo acceder a la gestión de 2.4GHz");
         
         const finalPath = func.createMainFolder();
         await func.delay(2000);
  
         // Iterar sobre canales y capturar pantallas
-        const mainFrame = page.frames().find(frame => frame.name() === 'mainFrm');
-        if (!(await func.iterateChannels(mainFrame, finalPath, page))) throw new Error("No se pudo iterar sobre los canales");
+        if (!(await func.iterateChannels(page, finalPath))) throw new Error("No se pudo iterar sobre los canales");
        
 ;
     } catch (error) {
