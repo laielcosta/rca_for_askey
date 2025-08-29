@@ -1,6 +1,6 @@
 /*
 Instrucciones para ejecutar el script:
-Este script interactúa con la WEBGUI del DUT, accediendo a la gestión de la interfaz de 2,4 GHz, cambiando los canales disponibles
+Este script interactúa con la WEBGUI del DUT, accediendo a la gestión de la interfaz de 2,4 GHz y 5GHZ, cambiando los canales disponibles
 uno a uno y realizando capturas tanto de la WEB como de InSSIDer en el proceso.
 
 Antes de ejecutar el script:
@@ -19,17 +19,56 @@ Antes de ejecutar el script:
     node main.js
 
 Notas importantes:
-•	Este script fue desarrollado específicamente para la interfaz de dispositivos HGU de Askey Wifi 5. Es posible que no funcione de manera
+•	Este script fue desarrollado específicamente para la interfaz de dispositivos HGU de Askey Wifi 5 y 6. Es posible que no funcione de manera
  equivalente en productos de otros fabricantes debido a diferencias en la arquitectura y protocolos de comunicación.
 
 Sigue en desarrollo…
 */
+
+// ---------- Self-check de dependencias ----------
+const { spawnSync } = require('child_process');
+const path  = require('path');
+
+(function ensureDeps() {
+  try {
+    require.resolve('puppeteer');
+    require.resolve('screenshot-desktop');
+    return;                              // ← todo OK, continúa ejecución
+  } catch { /* nada */ }
+
+  // si ya intentamos una vez en este proceso, abortar
+  if (process.env.DEPS_ATTEMPTED) {
+    console.error('Las dependencias siguen sin instalarse. Abortando.');
+    process.exit(1);
+  }
+
+  console.log('Faltan dependencias. Ejecutando install_deps.ps1 …');
+  const ps1 = path.join(__dirname, 'install_deps.ps1');
+  const code = spawnSync('powershell.exe',
+    ['-NoProfile','-ExecutionPolicy','Bypass','-File', ps1],
+    { stdio: 'inherit' }
+  ).status;
+
+  if (code !== 0) {
+    console.error('install_deps.ps1 terminó con error', code);
+    process.exit(code);
+  }
+
+  // relanza UNA sola vez
+  spawnSync(process.argv0, process.argv.slice(1), {
+    stdio: 'inherit',
+    env: { ...process.env, DEPS_ATTEMPTED: '1' }
+  });
+  process.exit(0);
+})();
+//  -------------------------------------------------------------
+
 const puppeteer = require('puppeteer');
 const func = require('./channels_functions.js');
 
 (async () => {
     const browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         defaultViewport: { width: 1366, height: 768 },  // Tamaño de ventana para simular un portátil
         protocolTimeout: 120000
     });
@@ -52,7 +91,7 @@ const func = require('./channels_functions.js');
         console.log("Preparando el escenario...");
         func.runInSSIDer('"C:\\Program Files (x86)\\MetaGeek\\inSSIDer Home\\inSSIDerHome.exe"');
         await func.delay(2000);
-
+        
         // Obtener SSID
         const ssidValue = await wifiFrame.$eval('input.Input_box[type="text"]', el => el.value);
         console.log("Filtre en inSSIDer por SSID:", ssidValue);
