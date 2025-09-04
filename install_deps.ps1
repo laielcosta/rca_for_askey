@@ -4,6 +4,7 @@
  • Instala Node.js (si falta) mediante winget, Chocolatey o MSI oficial.
  • Comprueba que la versión sea ≥ 18.
  • Instala o reinstala (-Force) las dependencias definidas en package-lock.json.
+ • NUEVO: Instala el navegador Chromium necesario para Puppeteer.
 
  Uso:
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File install_deps.ps1 [-Force]
@@ -38,11 +39,88 @@ function Install-NodeFromMsi {
     $nodeVersion = "22.2.0"   # Cambia a la versión que prefieras
     $url = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-x64.msi"
     Write-Host "Downloading Node.js MSI..."
-    Invoke-WebRequest -Uri $url -OutFile $temp
-    Write-Host "Installing Node.js silently..."
-    Start-Process msiexec.exe -Wait -ArgumentList "/i `"$temp`" /qn /norestart"
-    Remove-Item $temp
-    return $LASTEXITCODE
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $temp -UseBasicParsing
+        Write-Host "Installing Node.js silently..."
+        Start-Process msiexec.exe -Wait -ArgumentList "/i `"$temp`" /qn /norestart"
+        $exitCode = $LASTEXITCODE
+        Remove-Item $temp -ErrorAction SilentlyContinue
+        return $exitCode
+    } catch {
+        Write-Error "Failed to download or install Node.js: $_"
+        Remove-Item $temp -ErrorAction SilentlyContinue
+        return 1
+    }
+}
+
+function Install-PuppeteerBrowser {
+    Write-Host ""
+    Write-Host "Installing Chromium browser for Puppeteer..."
+    
+    # Método 1: Usar el comando npx puppeteer browsers install chrome
+    try {
+        $result = npx puppeteer browsers install chrome 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Chromium installed successfully via npx puppeteer."
+            return $true
+        } else {
+            Write-Warning "npx puppeteer method failed: $result"
+        }
+    } catch {
+        Write-Warning "npx puppeteer method failed: $_"
+    }
+
+    # Método 2: Usar node para ejecutar el script de instalación
+    try {
+        $installScript = @"
+const puppeteer = require('puppeteer');
+(async () => {
+  try {
+    console.log('Downloading Chromium...');
+    const browser = await puppeteer.launch();
+    console.log('Chromium downloaded and tested successfully!');
+    await browser.close();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error installing Chromium:', error.message);
+    process.exit(1);
+  }
+})();
+"@
+        $scriptPath = Join-Path $ScriptDir "temp_install_chromium.js"
+        $installScript | Out-File -FilePath $scriptPath -Encoding UTF8
+        
+        Write-Host "Installing Chromium via Node.js script..."
+        node $scriptPath
+        $nodeExitCode = $LASTEXITCODE
+        Remove-Item $scriptPath -ErrorAction SilentlyContinue
+        
+        if ($nodeExitCode -eq 0) {
+            Write-Host "Chromium installed successfully via Node.js script."
+            return $true
+        } else {
+            Write-Warning "Node.js script method failed with exit code: $nodeExitCode"
+        }
+    } catch {
+        Write-Warning "Node.js script method failed: $_"
+        Remove-Item $scriptPath -ErrorAction SilentlyContinue
+    }
+
+    # Método 3: Instalación manual usando la cache de Puppeteer
+    try {
+        Write-Host "Attempting manual Chromium installation..."
+        $env:PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = ""
+        npm install puppeteer --force
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Chromium should now be available."
+            return $true
+        }
+    } catch {
+        Write-Warning "Manual installation method failed: $_"
+    }
+
+    Write-Error "All Chromium installation methods failed. Puppeteer may not work correctly."
+    return $false
 }
 
 #------------------------------------------------------------
@@ -128,6 +206,10 @@ $nodeModulesPath = Join-Path $ScriptDir "node_modules"
 
 if (-not (Test-Path $nodeModulesPath) -or $Force) {
     Write-Host "Installing project dependencies (this may take a while)..."
+    
+    # Asegurar que Puppeteer descargue Chromium
+    $env:PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = ""
+    
     npm ci --loglevel error
     if ($LASTEXITCODE -ne 0) {
         Write-Error "npm ci failed with code $LASTEXITCODE."
@@ -139,6 +221,54 @@ if (-not (Test-Path $nodeModulesPath) -or $Force) {
     Write-Host "Dependencies already present. Use -Force to reinstall."
 }
 
+#------------------------------------------------------------
+#  3. NUEVO: Verificar y instalar el navegador Chromium
+#------------------------------------------------------------
+Write-Host ""
+Write-Host "Checking Chromium installation for Puppeteer..."
+
+# Verificar si Chromium ya está instalado
+$chromiumTest = @"
+const puppeteer = require('puppeteer');
+(async () => {
+  try {
+    const browser = await puppeteer.launch({ headless: true });
+    await browser.close();
+    console.log('CHROMIUM_OK');
+    process.exit(0);
+  } catch (error) {
+    console.log('CHROMIUM_MISSING');
+    process.exit(1);
+  }
+})();
+"@
+
+$testScriptPath = Join-Path $ScriptDir "temp_test_chromium.js"
+$chromiumTest | Out-File -FilePath $testScriptPath -Encoding UTF8
+
+try {
+    $testResult = node $testScriptPath 2>&1
+    Remove-Item $testScriptPath -ErrorAction SilentlyContinue
+    
+    if ($testResult -match "CHROMIUM_OK") {
+        Write-Host "Chromium is already installed and working."
+    } else {
+        Write-Host "Chromium not found or not working. Installing..."
+        $browserInstalled = Install-PuppeteerBrowser
+        if (-not $browserInstalled) {
+            Write-Warning "Chromium installation failed. The script may not work properly."
+        }
+    }
+} catch {
+    Remove-Item $testScriptPath -ErrorAction SilentlyContinue
+    Write-Host "Could not test Chromium installation. Attempting to install..."
+    $browserInstalled = Install-PuppeteerBrowser
+}
+
 Write-Host ""
 Write-Host "Environment ready. You can now run channels.js."
+Write-Host ""
+Write-Host "If you encounter issues with Chromium, you can manually install it by running:"
+Write-Host "  npx puppeteer browsers install chrome"
+Write-Host ""
 exit 0
