@@ -1,29 +1,5 @@
 /*
-Instrucciones para ejecutar el script:
-Este script interactúa con la WEBGUI del DUT, accediendo a la gestión de la interfaz de 2,4 GHz y 5GHZ, cambiando los canales disponibles
-uno a uno y realizando capturas tanto de la WEB como de InSSIDer en el proceso.
-
-Antes de ejecutar el script:
-1.	Instalar Node.js:
-    Descarga e instala Node.js desde https://nodejs.org/.
-    Verifica la instalación ejecutando:
-    node -v
-    npm -v
-
-2.	Instalar dependencias del proyecto:
-    En la terminal, navega a la carpeta del proyecto y ejecuta:
-    npm install puppeteer screenshot-desktop fs path child_process
-
-3.	Ejecutar el script:
-    Una vez instaladas todas las dependencias, puedes ejecutar el script con:
-    node channels.js
-    O simplemente ejecutar: run.bat
-
-Notas importantes:
-•	Este script fue desarrollado específicamente para la interfaz de dispositivos HGU de Askey Wifi 5 y 6. Es posible que no funcione de manera
- equivalente en productos de otros fabricantes debido a diferencias en la arquitectura y protocolos de comunicación.
-
-Versión mejorada con mejor detección de dependencias y navegador.
+Versión mejorada con mejor detección de dependencias y navegador y usa ruta fija en C:.
 */
 
 // ---------- Self-check de dependencias ----------
@@ -125,8 +101,10 @@ const func = require('./channels_functions.js');
         if (!(await func.navigateToAdvancedSettings(wifiFrame))) throw new Error("No se pudo acceder a configuración avanzada");
         await func.delay(2000);
 
-        //
+        // Crear carpeta de trabajo en C:\CapturasCanales
         const finalPath = func.createMainFolder();
+        if (!finalPath) throw new Error("No se pudo crear el directorio de trabajo");
+        
         await func.delay(2000);
 
         //Acceder a la configuración de "2,4GHz"
@@ -158,6 +136,10 @@ const func = require('./channels_functions.js');
         }
 
         console.log("Script completado exitosamente.");
+        console.log("================================================");
+        console.log("TODAS LAS CAPTURAS SE GUARDARON EN:");
+        console.log(finalPath);
+        console.log("================================================");
 
     } catch (error) {
         console.error("Error durante la ejecución:", error.message);
