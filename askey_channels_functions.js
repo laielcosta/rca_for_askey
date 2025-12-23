@@ -104,168 +104,217 @@ function getDesktopPath() {
     return path.resolve("C:\\CapturasCanales");
 }
 
-async function getBandwidthOptions(mainFrame) {
-    await mainFrame.waitForSelector('select#adm_bandwidth', { visible: true });
+// 🔑 Función para normalizar bandwidths y crear nombres de carpeta
+function normalizeBandwidthForFolder(bandwidthText) {
+    const lower = bandwidthText.toLowerCase().trim();
+    
+    // Eliminar "(auto)" y espacios extras
+    let clean = lower.replace(/\(auto\)/g, '').trim();
+    
+    // Reemplazar "/" por "_"
+    clean = clean.replace(/\//g, '_');
+    
+    // Reemplazar espacios por ""
+    clean = clean.replace(/\s+/g, '');
+    
+    // Mapeo específico
+    const mapping = {
+        '20mhz': '20MHz',
+        '20-40mhz': '20MHz_40MHz',
+        '20_40mhz': '20MHz_40MHz',
+        '40mhz': '40MHz',
+        '80mhz': '80MHz',
+        '160mhz': '160MHz',
+    };
+    
+    if (mapping[clean]) {
+        return mapping[clean];
+    }
+    
+    // Capitalizar MHz si está presente
+    if (clean.includes('mhz')) {
+        clean = clean.replace('mhz', 'MHz');
+    }
+    
+    // Asegurar formato correcto
+    return sanitizeName(clean);
+}
+
+async function getBandwidthOptions(mainFrame, band) {
     try {
-        return await mainFrame.evaluate(() => {
-            const options = document.querySelectorAll('select#adm_bandwidth option');
-            if (!options.length) throw new Error('No se encontraron opciones para el ancho de banda.');
-            return Array.from(options).map(option => ({
+        await mainFrame.waitForSelector('select#adm_bandwidth', { visible: true, timeout: 10000 });
+        
+        // Verificar si el selector está deshabilitado
+        const isDisabled = await mainFrame.$eval('select#adm_bandwidth', el => el.disabled);
+        
+        if (isDisabled) {
+            console.log(`⚠️  Bandwidth selector está DESHABILITADO (gris) en ${band}`);
+            console.log(`   Este router solo tiene UNA opción de bandwidth fija.`);
+            
+            // Obtener la opción actual aunque esté disabled
+            const currentBandwidth = await mainFrame.$eval('select#adm_bandwidth', el => {
+                const selected = el.options[el.selectedIndex];
+                return {
+                    value: selected.value,
+                    bandwidth: selected.textContent.trim(),
+                    disabled: true
+                };
+            });
+            
+            console.log(`   Bandwidth fija detectada: ${currentBandwidth.bandwidth}`);
+            return [currentBandwidth];
+        }
+        
+        // Si NO está disabled, obtener todas las opciones
+        const options = await mainFrame.evaluate(() => {
+            const select = document.querySelector('select#adm_bandwidth');
+            if (!select) return [];
+            
+            return Array.from(select.options).map(option => ({
                 value: option.value,
-                bandwidth: option.textContent.trim()
+                bandwidth: option.textContent.trim(),
+                disabled: false
             }));
         });
+        
+        if (options.length === 0) {
+            console.warn(`⚠️  No se encontraron opciones de bandwidth para ${band}`);
+        }
+        
+        return options;
+        
     } catch (error) {
-        console.error('Error al obtener los datos del selector de ancho de banda:', error.message);
+        console.error(`Error al obtener bandwidths para ${band}:`, error.message);
         return [];
     }
 }
 
 async function BandwidthAndIterateChannels(mainFrame, finalPath, page, band, optionsData) {
-    console.log(`\nIniciando iteración de anchos de banda para ${band}...`);
+    console.log(`\n╔════════════════════════════════════════════════╗`);
+    console.log(`║  Iniciando iteración para ${band.padEnd(26)} ║`);
+    console.log(`╚════════════════════════════════════════════════╝\n`);
     
     await handleDialog(page);
     
-    for (const { value, bandwidth } of optionsData) {
-        console.log(`\n=== Configurando ancho de banda: ${bandwidth} ===`);
+    if (optionsData.length === 0) {
+        console.error(`❌ No hay bandwidths disponibles para ${band}`);
+        return;
+    }
+    
+    for (let bwIndex = 0; bwIndex < optionsData.length; bwIndex++) {
+        const { value, bandwidth, disabled } = optionsData[bwIndex];
         
-        let bandwidthForName = sanitizeName(bandwidth.replace('/', '_').replace(' ', ''));
-
-        // Filtrar bandwidths según la banda
-        if (band === '2.4GHz' && !['20MHz', '20MHz_40MHz'].includes(bandwidthForName)) {
-            console.log(`  ⏭️  Saltando bandwidth ${bandwidth} (no compatible con 2.4GHz)`);
-            continue;
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`   BANDWIDTH ${bwIndex + 1}/${optionsData.length}: ${bandwidth}`);
+        console.log(`${'='.repeat(60)}`);
+        
+        // Normalizar nombre para carpeta
+        const bandwidthForFolder = normalizeBandwidthForFolder(bandwidth);
+        console.log(`   → Nombre de carpeta: ${bandwidthForFolder}`);
+        
+        // Si el bandwidth NO está disabled, seleccionarlo
+        if (!disabled) {
+            try {
+                console.log(`   → Seleccionando bandwidth en dropdown...`);
+                await handleDialog(page);
+                await mainFrame.waitForSelector('select#adm_bandwidth', { visible: true, timeout: 5000 });
+                await mainFrame.select('select#adm_bandwidth', value);
+                await delay(2000);
+                
+                // Aplicar el cambio
+                console.log(`   → Aplicando bandwidth...`);
+                await mainFrame.click('input[value="Apply"]');
+                await delay(5000);
+                console.log(`   ✓ Bandwidth aplicado`);
+                
+            } catch (error) {
+                console.error(`   ❌ Error al cambiar bandwidth: ${error.message}`);
+                continue;
+            }
+        } else {
+            console.log(`   ℹ️  Bandwidth fija (no seleccionable) - usando actual`);
         }
-        if (band === '5GHz' && !['20MHz', '40MHz', '80MHz'].includes(bandwidthForName)) {
-            console.log(`  ⏭️  Saltando bandwidth ${bandwidth} (no compatible con 5GHz)`);
-            continue;
-        }
-
-        try {
-            await handleDialog(page);
-            
-            // Seleccionar el bandwidth
-            await mainFrame.waitForSelector('select#adm_bandwidth', { visible: true, timeout: 5000 });
-            await mainFrame.select('select#adm_bandwidth', value);
-            console.log(`  Bandwidth seleccionado: ${bandwidth}`);
-            await delay(2000);
-            
-            // Hacer clic en Apply
-            await mainFrame.click('input[value="Apply"]');
-            console.log(`  ✓ Botón Apply presionado`);
-            
-            // Esperar según la banda (Askey no reinicia interfaz como Mitrastar)
-            console.log('  ⏳ Esperando 5 segundos para aplicar cambios...');
-            await delay(5000);
-            
-        } catch (error) {
-            console.error(`Error al cambiar el ancho de banda a ${bandwidth}:`, error.message);
-            continue;
-        }
-
-        // Crear carpeta para este bandwidth
+        
+        // Crear estructura de carpetas
         let freqFolder = band === '5GHz' ? '5GHz' : sanitizeName('2_4GHz');
-        let bwFolder = sanitizeName(bandwidth.replace(' ', '').replace('/', '_'));
+        const savePath = path.join(finalPath, freqFolder, bandwidthForFolder);
         
-        const savePath = path.join(finalPath, freqFolder, bwFolder);
-        
-        // Asegurarnos de que la carpeta existe
         if (!fs.existsSync(savePath)) {
             fs.mkdirSync(savePath, { recursive: true });
             fs.mkdirSync(path.join(savePath, 'WEB'), { recursive: true });
             fs.mkdirSync(path.join(savePath, 'INSSIDER'), { recursive: true });
+            console.log(`   ✓ Carpeta creada: ${savePath}`);
         }
-
+        
         // Obtener canales disponibles
-        console.log('  Obteniendo canales disponibles...');
+        console.log(`\n   📋 Obteniendo canales disponibles...`);
         await delay(2000);
         
-        let availableChannels = await mainFrame.$$eval('select#adm_channel option', options => 
-            options.map(opt => opt.value)
-        );
-        
-        console.log(`  Canales disponibles: ${availableChannels.join(', ')}`);
-        
-        if (availableChannels.length === 0) {
-            console.warn(`  No se encontraron canales para ${bandwidth}`);
+        let availableChannels;
+        try {
+            availableChannels = await mainFrame.$$eval('select#adm_channel option', options => 
+                options.map(opt => ({
+                    value: opt.value,
+                    text: opt.textContent.trim()
+                }))
+            );
+        } catch (error) {
+            console.error(`   ❌ Error obteniendo canales: ${error.message}`);
             continue;
         }
-
-        // ============================================================
-        // ITERACIÓN DE CANALES - VERSIÓN MEJORADA ESTILO MITRASTAR
-        // ============================================================
         
-        // 🔑 Determinar si son canales DFS (5GHz)
-        const isDFSChannel = (channel) => {
-            const channelNum = parseInt(channel);
-            return band === '5GHz' && channelNum >= 52 && channelNum <= 144;
-        };
+        console.log(`   ✓ Canales detectados: ${availableChannels.map(ch => ch.text).join(', ')}`);
+        
+        if (availableChannels.length === 0) {
+            console.warn(`   ⚠️  No hay canales disponibles`);
+            continue;
+        }
+        
+        // ═══════════════════════════════════════════════════════════
+        // ITERACIÓN DE CANALES
+        // ═══════════════════════════════════════════════════════════
         
         for (let i = 0; i < availableChannels.length; i++) {
-            const channel = availableChannels[i];
-            const channelText = channel === '0' ? 'Auto' : channel;
-            const isFirstChannel = i === 0;
+            const { value: channelValue, text: channelText } = availableChannels[i];
+            const channelDisplay = channelValue === '0' ? 'Auto' : channelText;
             
-            console.log(`\n    → Configurando canal ${channelText}...`);
+            console.log(`\n   ┌─────────────────────────────────────────────┐`);
+            console.log(`   │ Canal ${i + 1}/${availableChannels.length}: ${channelDisplay.padEnd(30)}│`);
+            console.log(`   └─────────────────────────────────────────────┘`);
             
             try {
                 // Seleccionar el canal
-                await mainFrame.select('select#adm_channel', channel);
-                console.log(`    Canal ${channelText} seleccionado en dropdown`);
+                console.log(`     → Seleccionando canal en dropdown...`);
+                await mainFrame.select('select#adm_channel', channelValue);
                 await delay(2000);
                 
-                // Aplicar el cambio
+                // Aplicar
+                console.log(`     → Aplicando cambio...`);
                 await handleDialog(page);
                 await mainFrame.click('input[value="Apply"]');
-                console.log(`    ✓ Botón Apply presionado`);
                 
-                // ⚠️ CRÍTICO: TIEMPOS AJUSTADOS PARA ASKEY
-                let waitTime;
+                // ⚠️ ESPERA ESTÁNDAR (el router aplica rápido)
+                console.log(`     ⏳ Esperando 8s para aplicación...`);
+                await delay(8000);
                 
-                if (band === '5GHz') {
-                    // 5GHz necesita más tiempo
-                    if (channel === '0') {
-                        waitTime = 35000; // 35s para Auto
-                        console.log(`    ⏳ [5GHz-Auto] Esperando ${waitTime/1000}s...`);
-                    } else if (isFirstChannel) {
-                        waitTime = 40000; // 40s para primer canal
-                        console.log(`    ⏳ [5GHz-Primer canal post-BW] Esperando ${waitTime/1000}s...`);
-                    } else if (isDFSChannel(channel)) {
-                        waitTime = 35000; // 35s para canales DFS
-                        console.log(`    ⏳ [5GHz-DFS] Esperando ${waitTime/1000}s (escaneo de radar)...`);
-                    } else {
-                        waitTime = 28000; // 28s para canales normales
-                        console.log(`    ⏳ [5GHz-Normal] Esperando ${waitTime/1000}s...`);
-                    }
-                } else {
-                    // 2.4GHz - Askey es más rápido que Mitrastar
-                    if (channel === '0') {
-                        waitTime = 25000; // 25s para Auto
-                        console.log(`    ⏳ [2.4GHz-Auto] Esperando ${waitTime/1000}s...`);
-                    } else {
-                        waitTime = 20000; // 20s para canales normales
-                        console.log(`    ⏳ [2.4GHz-Normal] Esperando ${waitTime/1000}s...`);
-                    }
-                }
+                // ⚠️ ESPERA PARA INSSIDER (problema real)
+                console.log(`     ⏳ Esperando 12s para estabilización de inSSIDer...`);
+                await delay(12000);
                 
-                // ⚠️ NO HACER NADA MÁS DESPUÉS DE APPLY
-                // Simplemente esperar sin interrupciones
-                await delay(waitTime);
-                
-                // Estabilización de inSSIDer
-                console.log(`    ⏳ Esperando 6s adicionales para estabilización de inSSIDer...`);
-                await delay(6000);
-                
-                // Solo ahora capturar - sin verificar nada antes
-                console.log(`    📸 Capturando evidencias...`);
-                await captureScreenshots(page, savePath, channelText, bandwidthForName);
+                // Capturar
+                console.log(`     📸 Capturando evidencias...`);
+                await captureScreenshots(page, savePath, channelDisplay, bandwidthForFolder);
                 
             } catch (error) {
-                console.error(`    ❌ Error configurando canal ${channelText}:`, error.message);
+                console.error(`     ❌ Error en canal ${channelDisplay}: ${error.message}`);
                 continue;
             }
         }
     }
+    
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(`✓✓✓ Iteración completada para ${band}`);
+    console.log(`${'═'.repeat(60)}\n`);
 }
 
 async function captureScreenshots(page, savePath, channel, bandwidthForName) {
@@ -283,49 +332,51 @@ async function captureScreenshots(page, savePath, channel, bandwidthForName) {
         const safeChannel = sanitizeName(channel.toString());
         const safeBandwidth = sanitizeName(bandwidthForName);
         
-        // Captura de la WEB del router (una sola vez)
+        // Captura WEB (1 sola)
         const webFilename = `channel_${safeChannel}_${safeBandwidth}.png`;
-        console.log(`    📸 Capturando interfaz web: ${webFilename}`);
         await page.screenshot({ path: path.join(webPath, webFilename), fullPage: true });
+        console.log(`       ✓ WEB: ${webFilename}`);
         
-        // 🔑 MEJORA DE MITRASTAR: 2 capturas de inSSIDer con intervalo
-        console.log(`    📸 Capturando inSSIDer (2 capturas)...`);
-        
+        // Capturas inSSIDer (2 con intervalo)
         for (let i = 1; i <= 2; i++) {
             const inssiderFilename = `inSSIDer_channel_${safeChannel}_${safeBandwidth}_${i}.png`;
             
             try {
                 await screenshot({ filename: path.join(inssiderPath, inssiderFilename) });
-                console.log(`      ✓ Captura ${i}/2 guardada`);
+                console.log(`       ✓ inSSIDer ${i}/2: ${inssiderFilename}`);
             } catch (error) {
-                console.error(`      ⚠ Error en captura ${i}/2:`, error.message);
+                console.error(`       ⚠ Error captura inSSIDer ${i}/2: ${error.message}`);
             }
             
-            // Esperar 3 segundos entre capturas (solo después de la primera)
             if (i < 2) {
                 await delay(3000);
             }
         }
         
-        console.log("    ✓ Capturas completadas");
-        
     } catch (error) {
-        console.error('    Error al guardar capturas:', error.message);
+        console.error('     ❌ Error guardando capturas:', error.message);
     }
 }
 
 async function iterateChannels(mainFrame, finalPath, page, band) {
     if (!mainFrame) {
-        console.error(`mainFrame no definido para ${band}`);
+        console.error(`❌ mainFrame no definido para ${band}`);
         return;
     }
     
     await delay(1500);
-    const optionsData = await getBandwidthOptions(mainFrame);
-    console.log(`Opciones de ancho de banda detectadas para ${band}:`, optionsData.map(opt => opt.bandwidth));
+    
+    // Obtener bandwidths (puede ser 1 fijo disabled, o múltiples)
+    const optionsData = await getBandwidthOptions(mainFrame, band);
+    
+    console.log(`\n📊 Resumen de bandwidths para ${band}:`);
+    optionsData.forEach((opt, idx) => {
+        const status = opt.disabled ? '[FIJO]' : '[SELECCIONABLE]';
+        console.log(`   ${idx + 1}. ${opt.bandwidth} ${status}`);
+    });
     
     if (optionsData.length === 0) {
-        console.warn(`No se encontraron opciones de ancho de banda para ${band}`);
+        console.warn(`⚠️  No se encontraron opciones de bandwidth para ${band}`);
         return;
     }
 
@@ -356,37 +407,10 @@ function createMainFolder() {
 
     try {
         fs.mkdirSync(finalPath, { recursive: true });
-        console.log(`Las capturas se guardarán en: ${finalPath}`);
-
-        // Crear estructura de 2.4GHz
-        const path24GHz = path.join(finalPath, sanitizeName('2_4GHz'));
-        fs.mkdirSync(path24GHz, { recursive: true });
-
-        ['20MHz', '20MHz_40MHz'].forEach(subFolder => {
-            const safeSubFolder = sanitizeName(subFolder);
-            const subPath = path.join(path24GHz, safeSubFolder);
-            fs.mkdirSync(subPath, { recursive: true });
-            fs.mkdirSync(path.join(subPath, 'WEB'), { recursive: true });
-            fs.mkdirSync(path.join(subPath, 'INSSIDER'), { recursive: true });
-        });
-
-        // Crear estructura de 5GHz
-        const path5GHz = path.join(finalPath, '5GHz');
-        fs.mkdirSync(path5GHz, { recursive: true });
-
-        ['20MHz', '40MHz', '80MHz'].forEach(subFolder => {
-            const safeSubFolder = sanitizeName(subFolder);
-            const subPath = path.join(path5GHz, safeSubFolder);
-            fs.mkdirSync(subPath, { recursive: true });
-            fs.mkdirSync(path.join(subPath, 'WEB'), { recursive: true });
-            fs.mkdirSync(path.join(subPath, 'INSSIDER'), { recursive: true });
-        });
-
-        console.log("Estructura de carpetas creada correctamente.");
-        console.log(`Path absoluto completo: ${path.resolve(finalPath)}`);
+        console.log(`\n📁 Carpeta principal: ${finalPath}\n`);
         return finalPath;
     } catch (error) {
-        console.error(`Error al crear las carpetas: ${error.message}`);
+        console.error(`Error al crear carpeta principal: ${error.message}`);
         return null;
     }
 }
