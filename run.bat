@@ -103,7 +103,7 @@ echo [INFO] Iniciando el script principal...
 echo.
 
 :: 4 · Lanzar el script principal
-node channels.js %*
+node askey_channels.js %*
 set SCRIPT_EXIT_CODE=%ERRORLEVEL%
 
 echo.
